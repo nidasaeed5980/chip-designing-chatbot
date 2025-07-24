@@ -1,5 +1,8 @@
 import streamlit as st
 import google.generativeai as genai
+import json
+import os
+from datetime import datetime
 
 # 🔐 Set your Gemini API key
 genai.configure(api_key="AIzaSyAa7SQGBixtGVAKgI72tGqtMUkJJs5AUAw")  # Replace with your real key
@@ -14,6 +17,21 @@ st.set_page_config(page_title="💡 Chip Design Chatbot", layout="centered")
 # Ensure chat history is initialized before any access
 if "messages" not in st.session_state:
     st.session_state.messages = []
+
+# Persistent chat history file
+history_file = 'chat_history.json'
+
+# Load history at startup
+if "messages" not in st.session_state:
+    if os.path.exists(history_file):
+        with open(history_file, 'r', encoding='utf-8') as f:
+            st.session_state.messages = json.load(f)
+    else:
+        st.session_state.messages = []
+
+def save_history():
+    with open(history_file, 'w', encoding='utf-8') as f:
+        json.dump(st.session_state.messages, f)
 
 # ---------- Custom CSS Styling ----------
 page_bg_img = """
@@ -228,17 +246,61 @@ st.markdown('<div class="header-img">'
             '<h1>Chip Design Chatbot <span style="font-size:0.7em;">✨</span></h1>'
             '</div>', unsafe_allow_html=True)
 
+# ---------- Sidebar for Previous Chat ----------
+CHAT_DIR = "chats"
+os.makedirs(CHAT_DIR, exist_ok=True)
+
+def list_chat_files():
+    return sorted([f for f in os.listdir(CHAT_DIR) if f.endswith('.json')], reverse=True)
+
+def save_current_chat():
+    if st.session_state.messages:
+        # Use the first user message and timestamp for filename
+        first_msg = st.session_state.messages[0]['content'][:20].replace(' ', '_')
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"chat_{timestamp}_{first_msg}.json"
+        with open(os.path.join(CHAT_DIR, filename), 'w', encoding='utf-8') as f:
+            json.dump(st.session_state.messages, f)
+
+def load_chat(filename):
+    with open(os.path.join(CHAT_DIR, filename), 'r', encoding='utf-8') as f:
+        st.session_state.messages = json.load(f)
+    st.rerun()
+
+# Sidebar: List all chats and New Chat button
+with st.sidebar:
+    st.title('💬 Chat History')
+    if st.button('➕ New Chat'):
+        st.session_state.messages = []
+        st.rerun()
+    latest_per_topic = {}
+    for chat_file in list_chat_files():
+        parts = chat_file.replace('.json', '').split('_')
+        if len(parts) >= 4:
+            topic = ' '.join(parts[3:]).replace('_', ' ')
+            latest_per_topic[topic] = chat_file  # This will keep the last (most recent) file for each topic
+
+    for topic, chat_file in latest_per_topic.items():
+        parts = chat_file.replace('.json', '').split('_')
+        time_str = parts[2][0:2] + ':' + parts[2][2:4]  # HH:MM
+        label = f"{time_str} {topic}"
+        if st.button(label, key=chat_file):
+            load_chat(chat_file)
+
 # ---------- Input Row Just Below Header ----------
 st.markdown('<div class="input-row">', unsafe_allow_html=True)
 user_input = st.chat_input("Ask your chip design question here...")
+# Remove the button from the main input row (if present)
 st.markdown('</div>', unsafe_allow_html=True)
 
 # User input logic and Gemini response (handle before rendering chat area)
 if user_input:
     st.session_state.messages.append({"role": "user", "content": user_input})
+    save_current_chat()
     try:
         response = chat.send_message(user_input)
         st.session_state.messages.append({"role": "assistant", "content": response.text})
+        save_current_chat()
     except Exception as e:
         st.error(f"❌ Error: {e}")
 
